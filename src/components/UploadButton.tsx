@@ -4,15 +4,80 @@ import { useState } from "react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "./ui/dialog";
 
+import { trpc } from "@/app/_trpc/client";
+import { useUploadThing } from "@/lib/uploadthing";
 import { Cloud, File } from "lucide-react";
+import { useRouter } from "next/navigation";
 import Dropzone from "react-dropzone";
+import { Progress } from "./ui/progress";
+import { useToast } from "./ui/use-toast";
 
 const UploadDropzone = () => {
+  const [isUploading, setIsUploading] = useState(true);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  const { startUpload } = useUploadThing("pdfUploader");
+  const { toast } = useToast();
+  const router = useRouter();
+
+  const { mutate: startPulling } = trpc.getFile.useMutation({
+    onSuccess: (file) => {
+      router.push(`/dashboard/${file.id}`);
+    },
+    retry: true,
+    retryDelay: 500,
+  });
+
+  const startSimulatedProgress = () => {
+    setUploadProgress(0);
+
+    const interval = setInterval(() => {
+      setUploadProgress((currentState) => {
+        if (currentState >= 95) {
+          clearInterval(interval);
+          return currentState;
+        }
+        return currentState + 5;
+      });
+    }, 500);
+
+    return interval;
+  };
+
   return (
     <Dropzone
       multiple={false}
-      onDrop={(acceptedFile) => {
-        console.log("ex", acceptedFile);
+      onDrop={async (acceptedFile) => {
+        setIsUploading(true);
+
+        const progressInterval = startSimulatedProgress();
+
+        //handle file upload
+        const uploadResponse = await startUpload(acceptedFile);
+
+        if (!uploadResponse) {
+          return toast({
+            title: "Something went wrong",
+            description: "Please try again later",
+            variant: "destructive",
+          });
+        }
+
+        const [fileResponse] = uploadResponse;
+        const key = fileResponse?.key;
+
+        if (!key) {
+          return toast({
+            title: "Something went wrong",
+            description: "Please try again later",
+            variant: "destructive",
+          });
+        }
+
+        clearInterval(progressInterval);
+        setUploadProgress(100);
+
+        startPulling({ key });
       }}
     >
       {({ getRootProps, getInputProps, acceptedFiles }) => (
@@ -46,6 +111,22 @@ const UploadDropzone = () => {
                   </div>
                 </div>
               ) : null}
+
+              {isUploading ? (
+                <div className="w-full mt-4 max-w-xs mx-auto">
+                  <Progress
+                    value={uploadProgress}
+                    className="h-1 w-full bg-zinc-200"
+                  />
+                </div>
+              ) : null}
+
+              <input
+                {...getInputProps()}
+                type="file"
+                id="dropzone-file"
+                className="hidden"
+              />
             </label>
           </div>
         </div>
